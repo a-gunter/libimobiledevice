@@ -2000,6 +2000,7 @@ checkpoint:
 				plist_dict_set_item(opts, "Password", plist_new_string(backup_password));
 			}
 			PRINT_VERBOSE(1, "Backup password: %s\n", (backup_password == NULL ? "No":"Yes"));
+			plist_dict_set_item(opts, "ForceNoBuddy", plist_new_bool(1));
 
 			if (cmd_flags & CMD_FLAG_RESTORE_SKIP_APPS) {
 				PRINT_VERBOSE(1, "Not writing RestoreApplications.plist - apps will not be re-installed after restore\n");
