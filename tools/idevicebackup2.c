@@ -1991,7 +1991,7 @@ checkpoint:
 			if ((cmd_flags & CMD_FLAG_RESTORE_COPY_BACKUP) == 0)
 				plist_dict_set_item(opts, "RestoreDontCopyBackup", plist_new_bool(1));
 			PRINT_VERBOSE(1, "Don't copy backup: %s\n", ((cmd_flags & CMD_FLAG_RESTORE_COPY_BACKUP) == 0 ? "Yes":"No"));
-			plist_dict_set_item(opts, "RestorePreserveSettings", plist_new_bool(1);
+			plist_dict_set_item(opts, "RestorePreserveSettings", plist_new_bool(1));
 			PRINT_VERBOSE(1, "Preserve settings of device: %s\n", ((cmd_flags & CMD_FLAG_RESTORE_SETTINGS) == 0 ? "Yes":"No"));
 			if (cmd_flags & CMD_FLAG_RESTORE_REMOVE_ITEMS)
 				plist_dict_set_item(opts, "RemoveItemsNotRestored", plist_new_bool(1));
