@@ -634,7 +634,7 @@ static int write_pbuddy(afc_client_t afc)
 	plist_dict_set_item(pbuddy, "WebKitOfflineWebApplicationCacheEnabled", plist_new_bool(1));
 	plist_dict_set_item(pbuddy, "WebKitShrinksStandaloneImagesToFit", plist_new_bool(1));
 	plist_t lastPrepareLaunch = plist_new_array();
-	plist_t launch_date = plist_new_date(time(NULL) - MAC_EPOCH, 0));
+	plist_t launch_date = plist_new_date(time(NULL) - MAC_EPOCH, 0);
 	plist_t launch_int = plist_new_uint(0);
 	plist_array_append_item(lastPrepareLaunch, launch_date);
 	plist_array_append_item(lastPrepareLaunch, launch_int);
@@ -655,13 +655,13 @@ static int write_pbuddy(afc_client_t afc)
 		//goto leave;
 	//}
 
-	//afc_error_t afc_err = 0;
+	afc_error_t afc_err = 0;
 	//afc_err = afc_make_directory(afc, "/iTunesRestore");
 	//if (afc_err != AFC_E_SUCCESS) {
 		//printf("Error creating directory /iTunesRestore, error code %d\n", afc_err);
 		//goto leave;
 	//}
-
+	
 	afc_err = afc_file_open(afc, "/var/mobile/Library/Preferences/com.apple.purplebuddy.plist", AFC_FOPEN_WR, &pbuddy_file);
 	if (afc_err != AFC_E_SUCCESS || !pbuddy_file) {
 		printf("Error creating purplebuddy.plist, error code %d\n", afc_err);
