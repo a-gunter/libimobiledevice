@@ -662,7 +662,7 @@ static int write_pbuddy(afc_client_t afc)
 		//goto leave;
 	//}
 	
-	afc_err = afc_file_open(afc, "/var/mobile/Library/Preferences/com.apple.purplebuddy.plist", AFC_FOPEN_WR, &pbuddy_file);
+	afc_err = afc_file_open(afc, "/var/mobile/Library/Preferences/com.apple.PurpleBuddy.plist", AFC_FOPEN_WR, &pbuddy_file);
 	if (afc_err != AFC_E_SUCCESS || !pbuddy_file) {
 		printf("Error creating purplebuddy.plist, error code %d\n", afc_err);
 		goto leave;
