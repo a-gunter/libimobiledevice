@@ -78,7 +78,8 @@ enum cmd_mode {
 	CMD_CHANGEPW,
 	CMD_LEAVE,
 	CMD_CLOUD,
-	CMD_ERASE
+	CMD_ERASE,
+	CMD_PBUDDY
 };
 
 enum cmd_flags {
@@ -592,6 +593,132 @@ leave:
 
 	return res;
 }
+	
+static int write_pbuddy(afc_client_t afc)
+{
+	plist_t pbuddy = plist_new_dict();
+	int res = -1;
+	uint64_t pbuddy_file = 0;
+	char * pbuddy_plist_xml = NULL;
+	uint32_t pbuddy_plist_xml_length = 0;
+	
+	plist_dict_set_item(pbuddy, "AppleIDPB10Presented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "AssistantPHSOffered", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "AssistantPresented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "AutoUpdatePresented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "GuessedCountry", plist_new_string("US"));
+	plist_dict_set_item(pbuddy, "HSA2UpgradeMiniBuddy3Ran", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "HomeButtonCustomizePresented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "Language", plist_new_string("en-US"));
+	plist_dict_set_item(pbuddy, "Locale", plist_new_string("en_US"));
+	plist_dict_set_item(pbuddy, "MagnifyPresented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "Mesa2Presented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "PBDiagnostics4Presented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "Passcode4Presented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "PaymentMiniBuddy4Ran", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "PhoneNumberPermissionPresentedKey", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "PrivacyContentVersion", plist_new_uint(2));
+	plist_dict_set_item(pbuddy, "PrivacyPresented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "RestoreChoice", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "ScreenTimePresented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "SetupDone", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "SetupFinishedAllSteps", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "SetupLastExit", plist_new_date(time(NULL) - MAC_EPOCH, 0));
+	plist_dict_set_item(pbuddy, "SetupState", plist_new_string("SetupUsingAssistant"));
+	plist_dict_set_item(pbuddy, "SetupVersion", plist_new_uint(11));
+	plist_dict_set_item(pbuddy, "SiriOnBoardingPresented", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "UserChoseLanguage", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "WebDatabaseDirectory", plist_new_string("/var/mobile/Library/Caches"));
+	plist_dict_set_item(pbuddy, "WebKitAcceleratedDrawingEnabled", plist_new_bool(0));
+	plist_dict_set_item(pbuddy, "WebKitLocalStorageDatabasePathPreferenceKey", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "WebKitOfflineWebApplicationCacheEnabled", plist_new_bool(1));
+	plist_dict_set_item(pbuddy, "WebKitShrinksStandaloneImagesToFit", plist_new_bool(1));
+	plist_t lastPrepareLaunch = plist_new_array();
+	plist_t launch_date = plist_new_date(time(NULL) - MAC_EPOCH, 0));
+	plist_t launch_int = plist_new_uint(0);
+	plist_array_append_item(lastPrepareLaunch, launch_date);
+	plist_array_append_item(lastPrepareLaunch, launch_int);
+	plist_dict_set_item(pbuddy, "lastPrepareLaunchSentinel", lastPrepareLaunch);
+	plist_dict_set_item(pbuddy, "setupMigratorVersion", plist_new_bool(1));
+
+	plist_to_xml(pbuddy, &pbuddy_plist_xml, &pbuddy_plist_xml_length);
+	if (!pbuddy_plist_xml) {
+		printf("Error preparing PurpleBuddy.plist\n");
+		goto leave;
+	}
+	//plist_t applications_plist = plist_dict_get_item(info_plist, "Applications");
+	//if (applications_plist) {
+		//plist_to_xml(applications_plist, &applications_plist_xml, &applications_plist_xml_length);
+	//}
+	//if (!applications_plist_xml) {
+		//printf("Error preparing RestoreApplications.plist\n");
+		//goto leave;
+	//}
+
+	//afc_error_t afc_err = 0;
+	//afc_err = afc_make_directory(afc, "/iTunesRestore");
+	//if (afc_err != AFC_E_SUCCESS) {
+		//printf("Error creating directory /iTunesRestore, error code %d\n", afc_err);
+		//goto leave;
+	//}
+
+	afc_err = afc_file_open(afc, "/var/mobile/Library/Preferences/com.apple.purplebuddy.plist", AFC_FOPEN_WR, &pbuddy_file);
+	if (afc_err != AFC_E_SUCCESS || !pbuddy_file) {
+		printf("Error creating purplebuddy.plist, error code %d\n", afc_err);
+		goto leave;
+	}
+	//afc_err = afc_file_open(afc, "/iTunesRestore/RestoreApplications.plist", AFC_FOPEN_WR, &restore_applications_file);
+	//if (afc_err != AFC_E_SUCCESS  || !restore_applications_file) {
+		//printf("Error creating /iTunesRestore/RestoreApplications.plist, error code %d\n", afc_err);
+		//goto leave;
+	//}
+
+	uint32_t bytes_written = 0;
+	afc_err = afc_file_write(afc, pbuddy_file, pbuddy_plist_xml, pbuddy_plist_xml_length, &bytes_written);
+	if (afc_err != AFC_E_SUCCESS || bytes_written != pbuddy_plist_xml_length) {
+		printf("Error writing pbuddy.plist, error code %d, wrote %u of %u bytes\n", afc_err, bytes_written, pbuddy_plist_xml_length);
+		goto leave;
+	}
+	
+	//uint32_t bytes_written = 0;
+	//afc_err = afc_file_write(afc, restore_applications_file, applications_plist_xml, applications_plist_xml_length, &bytes_written);
+	//if (afc_err != AFC_E_SUCCESS  || bytes_written != applications_plist_xml_length) {
+		//printf("Error writing /iTunesRestore/RestoreApplications.plist, error code %d, wrote %u of %u bytes\n", afc_err, bytes_written, applications_plist_xml_length);
+		//goto leave;
+	//}
+
+	afc_err = afc_file_close(afc, pbuddy_file);
+	pbuddy_file = 0;
+	if (afc_err != AFC_E_SUCCESS) {
+		goto leave;
+	}
+	/* success */
+	res = 0;
+	
+	//afc_err = afc_file_close(afc, restore_applications_file);
+	//restore_applications_file = 0;
+	//if (afc_err != AFC_E_SUCCESS) {
+		//goto leave;
+	//}
+	/* success */
+	//res = 0;
+
+leave:
+	//free(applications_plist_xml);
+	free(pbuddy_plist_xml);
+
+	//if (restore_applications_file) {
+		//afc_file_close(afc, restore_applications_file);
+		//restore_applications_file = 0;
+	//}
+	if (pbuddy_file) {
+		afc_file_close(afc, pbuddy_file);
+		pbuddy_file = 0;
+	}
+
+	return res;
+}
+
 
 static int mb2_status_check_snapshot_state(const char *path, const char *udid, const char *matches)
 {
@@ -1423,6 +1550,7 @@ static void print_usage(int argc, char **argv)
 	printf("  changepw [OLD NEW]  change backup password on target device\n");
 	printf("    NOTE: passwords will be requested in interactive mode if omitted\n");
 	printf("  cloud on|off\tenable or disable cloud use (requires iCloud account)\n");
+	printf("  pbuddy\twrite purplebuddy.plist\n");
 	printf("  erase\terase all content and settings\n");
 	printf("\n");
 	printf("options:\n");
@@ -1503,8 +1631,11 @@ int main(int argc, char *argv[])
 		else if (!strcmp(argv[i], "restore")) {
 			cmd = CMD_RESTORE;
 		}
-		else if (!strcmp(argv[i], "erase")){
+		else if (!strcmp(argv[i], "erase")) {
 			cmd = CMD_ERASE;
+		}
+		else if(!strcmp(argv[i], "pbuddy")) {
+			cmd = CMD_PBUDDY;
 		}
 		else if (!strcmp(argv[i], "--system")) {
 			cmd_flags |= CMD_FLAG_RESTORE_SYSTEM_FILES;
@@ -1644,7 +1775,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (cmd == CMD_CHANGEPW || cmd == CMD_CLOUD || cmd == CMD_ERASE) {
+	if (cmd == CMD_CHANGEPW || cmd == CMD_CLOUD || cmd == CMD_ERASE || cmd == CMD_PBUDDY) {
 		backup_directory = (char*)".this_folder_is_not_present_on_purpose";
 	} else {
 		if (backup_directory == NULL) {
@@ -1895,6 +2026,12 @@ checkpoint:
 			case CMD_ERASE:
 			PRINT_VERBOSE(1, "Starting Erase device...\n");
 			err = mobilebackup2_send_message(mobilebackup2, "EraseDevice", NULL);
+			result_code = err;
+			cmd = CMD_LEAVE;
+			break;
+			case CMD_PBUDDY:
+			PRINT_VERBOSE(1, "Writing purplebuddy.plist...\n");
+			err = write_pbuddy(afc);
 			result_code = err;
 			cmd = CMD_LEAVE;
 			break;
