@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <time.h>
 
 #include <usbmuxd.h>
 #ifdef HAVE_OPENSSL
@@ -46,6 +47,10 @@
 
 #ifdef WIN32
 #include <windows.h>
+#endif
+
+#ifndef ETIMEDOUT
+#define ETIMEDOUT 138
 #endif
 
 #ifdef HAVE_OPENSSL
@@ -862,11 +867,6 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 		return IDEVICE_E_INVALID_ARG;
 
 	idevice_error_t ret = IDEVICE_E_SSL_ERROR;
-#ifdef HAVE_OPENSSL
-	uint32_t return_me = 0;
-#else
-	int return_me = 0;
-#endif
 	plist_t pair_record = NULL;
 
 	userpref_read_pair_record(connection->device->udid, &pair_record);
@@ -954,9 +954,22 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 	SSL_set_verify(ssl, 0, ssl_verify_callback);
 	SSL_set_bio(ssl, ssl_bio, ssl_bio);
 
-	return_me = SSL_do_handshake(ssl);
-	if (return_me != 1) {
-		debug_info("ERROR in SSL_do_handshake: %s", ssl_error_to_string(SSL_get_error(ssl, return_me)));
+	debug_info("Performing SSL handshake");
+	int ssl_error = 0;
+	do {
+		ssl_error = SSL_get_error(ssl, SSL_do_handshake(ssl));
+		if (ssl_error == 0 || ssl_error != SSL_ERROR_WANT_READ) {
+			break;
+		}
+#ifdef WIN32
+		Sleep(100);
+#else
+		struct timespec ts = { 0, 100000000 };
+		nanosleep(&ts, NULL);
+#endif
+	} while (1);
+	if (ssl_error != 0) {
+		debug_info("ERROR during SSL handshake: %s", ssl_error_to_string(ssl_error));
 		SSL_free(ssl);
 		SSL_CTX_free(ssl_ctx);
 	} else {
@@ -1010,6 +1023,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 		debug_info("WARNING: errno says %s before handshake!", strerror(errno));
 	}
 
+	int return_me = 0;
 	do {
 		return_me = gnutls_handshake(ssl_data_loc->session);
 	} while(return_me == GNUTLS_E_AGAIN || return_me == GNUTLS_E_INTERRUPTED);
@@ -1032,6 +1046,11 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 
 LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_disable_ssl(idevice_connection_t connection)
 {
+	return idevice_connection_disable_bypass_ssl(connection, 0);
+}
+
+LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_disable_bypass_ssl(idevice_connection_t connection, uint8_t sslBypass)
+{
 	if (!connection)
 		return IDEVICE_E_INVALID_ARG;
 	if (!connection->ssl_data) {
@@ -1039,24 +1058,29 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_disable_ssl(idevice_conn
 		return IDEVICE_E_SUCCESS;
 	}
 
+	// some services require plain text communication after SSL handshake
+	// sending out SSL_shutdown will cause bytes
+	if (!sslBypass) {
 #ifdef HAVE_OPENSSL
-	if (connection->ssl_data->session) {
-		/* see: https://www.openssl.org/docs/ssl/SSL_shutdown.html#RETURN_VALUES */
-		if (SSL_shutdown(connection->ssl_data->session) == 0) {
-			/* Only try bidirectional shutdown if we know it can complete */
-			int ssl_error;
-			if ((ssl_error = SSL_get_error(connection->ssl_data->session, 0)) == SSL_ERROR_NONE) {
-				SSL_shutdown(connection->ssl_data->session);
-			} else  {
-				debug_info("Skipping bidirectional SSL shutdown. SSL error code: %i\n", ssl_error);
+		if (connection->ssl_data->session) {
+			/* see: https://www.openssl.org/docs/ssl/SSL_shutdown.html#RETURN_VALUES */
+			if (SSL_shutdown(connection->ssl_data->session) == 0) {
+				/* Only try bidirectional shutdown if we know it can complete */
+				int ssl_error;
+				if ((ssl_error = SSL_get_error(connection->ssl_data->session, 0)) == SSL_ERROR_NONE) {
+					SSL_shutdown(connection->ssl_data->session);
+				} else  {
+					debug_info("Skipping bidirectional SSL shutdown. SSL error code: %i\n", ssl_error);
+				}
 			}
 		}
-	}
 #else
-	if (connection->ssl_data->session) {
-		gnutls_bye(connection->ssl_data->session, GNUTLS_SHUT_RDWR);
-	}
+		if (connection->ssl_data->session) {
+			gnutls_bye(connection->ssl_data->session, GNUTLS_SHUT_RDWR);
+		}
 #endif
+	}
+
 	internal_ssl_cleanup(connection->ssl_data);
 	free(connection->ssl_data);
 	connection->ssl_data = NULL;
