@@ -421,7 +421,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 		return IDEVICE_E_INVALID_ARG;
 	}
 
-	if (device->conn_type == CONNECTION_USBMUXD || device->conn_type == CONNECTION_NETWORK) {
+	if (device->conn_type == CONNECTION_USBMUXD) {
 		int sfd = usbmuxd_connect(device->mux_id, port);
 		if (sfd < 0) {
 			debug_info("ERROR: Connecting to usbmuxd failed: %d (%s)", sfd, strerror(-sfd));
@@ -429,6 +429,45 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 		}
 		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
 		new_connection->type = CONNECTION_USBMUXD;
+		new_connection->data = (void*)(long)sfd;
+		new_connection->ssl_data = NULL;
+		new_connection->device = device;
+		*connection = new_connection;
+		return IDEVICE_E_SUCCESS;
+	} else if (device->conn_type == CONNECTION_NETWORK) {
+		unsigned char saddr_[32];
+		memset(saddr_, '\0', sizeof(saddr_));
+		struct sockaddr* saddr = (struct sockaddr*)&saddr_[0];
+		if (((char*)device->conn_data)[1] == 0x02) { // AF_INET
+			saddr->sa_family = AF_INET;
+			memcpy(&saddr->sa_data[0], (char*)device->conn_data+2, 14);
+		}
+		else if (((char*)device->conn_data)[1] == 0x1E) { //AF_INET6 (bsd)
+#ifdef AF_INET6
+			saddr->sa_family = AF_INET6;
+			memcpy(&saddr->sa_data[0], (char*)device->conn_data+2, 26);
+#else
+			debug_info("ERROR: Got an IPv6 address but this system doesn't support IPv6");
+			return IDEVICE_E_UNKNOWN_ERROR;
+#endif
+		}
+		else {
+			debug_info("Unsupported address family 0x%02x", ((char*)device->conn_data)[1]);
+			return IDEVICE_E_UNKNOWN_ERROR;
+		}
+		char addrtxt[48];
+		addrtxt[0] = '\0';
+		if (!socket_addr_to_string(saddr, addrtxt, sizeof(addrtxt))) {
+			debug_info("Failed to convert network address: %d (%s)", errno, strerror(errno));
+		}
+		debug_info("Connecting to %s port %d...", addrtxt, port);
+		int sfd = socket_connect_addr(saddr, port);
+		if (sfd < 0) {
+			debug_info("ERROR: Connecting to network device failed: %d (%s)", errno, strerror(errno));
+			return IDEVICE_E_NO_DEVICE;
+		}
+		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
+		new_connection->type = CONNECTION_NETWORK;
 		new_connection->data = (void*)(long)sfd;
 		new_connection->ssl_data = NULL;
 		new_connection->device = device;
@@ -451,8 +490,12 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_disconnect(idevice_connection_t con
 		idevice_connection_disable_ssl(connection);
 	}
 	idevice_error_t result = IDEVICE_E_UNKNOWN_ERROR;
-	if (connection->type == CONNECTION_USBMUXD || connection->type == CONNECTION_NETWORK) {
+	if (connection->type == CONNECTION_USBMUXD) {
 		usbmuxd_disconnect((int)(long)connection->data);
+		connection->data = NULL;
+		result = IDEVICE_E_SUCCESS;
+	} else if (connection->type == CONNECTION_NETWORK) {
+		socket_close((int)(long)connection->data);
 		connection->data = NULL;
 		result = IDEVICE_E_SUCCESS;
 	} else {
@@ -474,12 +517,20 @@ static idevice_error_t internal_connection_send(idevice_connection_t connection,
 		return IDEVICE_E_INVALID_ARG;
 	}
 
-	if (connection->type == CONNECTION_USBMUXD || connection->type == CONNECTION_NETWORK) {
+	if (connection->type == CONNECTION_USBMUXD) {
 		int res = usbmuxd_send((int)(long)connection->data, data, len, sent_bytes);
 		if (res < 0) {
 			debug_info("ERROR: usbmuxd_send returned %d (%s)", res, strerror(-res));
 			return IDEVICE_E_UNKNOWN_ERROR;
 		}
+		return IDEVICE_E_SUCCESS;
+	} else if (connection->type == CONNECTION_NETWORK) {
+		int s = socket_send((int)(long)connection->data, (void*)data, len);
+		if (s < 0) {
+			*sent_bytes = 0;
+			return IDEVICE_E_UNKNOWN_ERROR;
+		}
+		*sent_bytes = s;
 		return IDEVICE_E_SUCCESS;
 	} else {
 		debug_info("Unknown connection type %d", connection->type);
@@ -498,7 +549,20 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_send(idevice_connection_
 		uint32_t sent = 0;
 		while (sent < len) {
 #ifdef HAVE_OPENSSL
+			int c = socket_check_fd((int)(long)connection->data, FDM_WRITE, 100);
+			if (c < 0) {
+				break;
+			} else if (c == 0) {
+				continue;
+			}
 			int s = SSL_write(connection->ssl_data->session, (const void*)(data+sent), (int)(len-sent));
+			if (s <= 0) {
+				int sslerr = SSL_get_error(connection->ssl_data->session, s);
+				if (sslerr == SSL_ERROR_WANT_WRITE) {
+					continue;
+				}
+				break;
+			}
 #else
 			ssize_t s = gnutls_record_send(connection->ssl_data->session, (void*)(data+sent), (size_t)(len-sent));
 #endif
@@ -514,8 +578,24 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_send(idevice_connection_
 		}
 		*sent_bytes = sent;
 		return IDEVICE_E_SUCCESS;
+	} else {
+		uint32_t sent = 0;
+		while (sent < len) {
+			uint32_t bytes = 0;
+			int s = internal_connection_send(connection, data+sent, len-sent, &bytes);
+			if (s < 0) {
+				break;
+			}
+			sent += bytes;
+		}
+		debug_info("internal_connection_send %d, sent %d", len, sent);
+		if (sent < len) {
+			*sent_bytes = 0;
+			return IDEVICE_E_NOT_ENOUGH_DATA;
+		}
+		*sent_bytes = sent;
+		return IDEVICE_E_SUCCESS;
 	}
-	return internal_connection_send(connection, data, len, sent_bytes);
 }
 
 static idevice_error_t socket_recv_to_idevice_error(int conn_error, uint32_t len, uint32_t received)
@@ -545,7 +625,7 @@ static idevice_error_t internal_connection_receive_timeout(idevice_connection_t 
 		return IDEVICE_E_INVALID_ARG;
 	}
 
-	if (connection->type == CONNECTION_USBMUXD || connection->type == CONNECTION_NETWORK) {
+	if (connection->type == CONNECTION_USBMUXD) {
 		int conn_error = usbmuxd_recv_timeout((int)(long)connection->data, data, len, recv_bytes, timeout);
 		idevice_error_t error = socket_recv_to_idevice_error(conn_error, len, *recv_bytes);
 
@@ -554,6 +634,14 @@ static idevice_error_t internal_connection_receive_timeout(idevice_connection_t 
 		}
 
 		return error;
+	} else if (connection->type == CONNECTION_NETWORK) {
+		int res = socket_receive_timeout((int)(long)connection->data, data, len, 0, timeout);
+		if (res < 0) {
+			debug_info("ERROR: socket_receive_timeout failed: %d (%s)", res, strerror(-res));
+			return (res == -EAGAIN ? IDEVICE_E_NOT_ENOUGH_DATA : IDEVICE_E_UNKNOWN_ERROR);
+		}
+		*recv_bytes = (uint32_t)res;
+		return IDEVICE_E_SUCCESS;
 	} else {
 		debug_info("Unknown connection type %d", connection->type);
 	}
@@ -590,14 +678,23 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_receive_timeout(idevice_
 
 #ifdef HAVE_OPENSSL
 			int r = SSL_read(connection->ssl_data->session, (void*)((char*)(data+received)), (int)len-received);
+			if (r > 0) {
+				received += r;
+			} else {
+				int sslerr = SSL_get_error(connection->ssl_data->session, r);
+				if (sslerr == SSL_ERROR_WANT_READ) {
+					continue;
+				}
+				break;
+			}
 #else
 			ssize_t r = gnutls_record_recv(connection->ssl_data->session, (void*)(data+received), (size_t)len-received);
-#endif
 			if (r > 0) {
 				received += r;
 			} else {
 				break;
 			}
+#endif
 		}
 
 		debug_info("SSL_read %d, received %d", len, received);
@@ -621,13 +718,20 @@ static idevice_error_t internal_connection_receive(idevice_connection_t connecti
 		return IDEVICE_E_INVALID_ARG;
 	}
 
-	if (connection->type == CONNECTION_USBMUXD || connection->type == CONNECTION_NETWORK) {
+	if (connection->type == CONNECTION_USBMUXD) {
 		int res = usbmuxd_recv((int)(long)connection->data, data, len, recv_bytes);
 		if (res < 0) {
 			debug_info("ERROR: usbmuxd_recv returned %d (%s)", res, strerror(-res));
 			return IDEVICE_E_UNKNOWN_ERROR;
 		}
-
+		return IDEVICE_E_SUCCESS;
+	} else if (connection->type == CONNECTION_NETWORK) {
+		int res = socket_receive((int)(long)connection->data, data, len);
+		if (res < 0) {
+			debug_info("ERROR: socket_receive returned %d (%s)", res, strerror(-res));
+			return IDEVICE_E_UNKNOWN_ERROR;
+		}
+		*recv_bytes = (uint32_t)res;
 		return IDEVICE_E_SUCCESS;
 	} else {
 		debug_info("Unknown connection type %d", connection->type);
@@ -665,7 +769,10 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_get_fd(idevice_connectio
 	}
 
 	idevice_error_t result = IDEVICE_E_UNKNOWN_ERROR;
-	if (connection->type == CONNECTION_USBMUXD || connection->type == CONNECTION_NETWORK) {
+	if (connection->type == CONNECTION_USBMUXD) {
+		*fd = (int)(long)connection->data;
+		result = IDEVICE_E_SUCCESS;
+	} else if (connection->type == CONNECTION_NETWORK) {
 		*fd = (int)(long)connection->data;
 		result = IDEVICE_E_SUCCESS;
 	} else {

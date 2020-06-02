@@ -65,13 +65,43 @@ static int triggered = 0;
 static idevice_t device = NULL;
 static syslog_relay_client_t syslog = NULL;
 
-static const char QUIET_FILTER[] = "CommCenter|SpringBoard|UserEventAgent|WirelessRadioManagerd|aggregated|appstored|backboardd|biometrickitd|bluetoothd|callservicesd|contextstored|corespeechd|dasd|gpsd|homed|identityservicesd|itunesstored|kernel|locationd|mDNSResponder|mediaremoted|mediaserverd|navd|nsurlsessiond|powerd|rapportd|routined|runningboardd|sharingd|symptomsd|thermalmonitord|useractivityd|wifid";
+static const char QUIET_FILTER[] = "CircleJoinRequested|CommCenter|HeuristicInterpreter|MobileMail|PowerUIAgent|ProtectedCloudKeySyncing|SpringBoard|UserEventAgent|WirelessRadioManagerd|accessoryd|accountsd|aggregated|analyticsd|appstored|apsd|assetsd|assistant_service|backboardd|biometrickitd|bluetoothd|calaccessd|callservicesd|cloudd|com.apple.Safari.SafeBrowsing.Service|contextstored|corecaptured|coreduetd|corespeechd|cdpd|dasd|dataaccessd|distnoted|dprivacyd|duetexpertd|findmydeviced|fmfd|fmflocatord|gpsd|healthd|homed|identityservicesd|imagent|itunescloudd|itunesstored|kernel|locationd|maild|mDNSResponder|mediaremoted|mediaserverd|mobileassetd|nanoregistryd|nanotimekitcompaniond|navd|nsurlsessiond|passd|pasted|photoanalysisd|powerd|powerlogHelperd|ptpd|rapportd|remindd|routined|runningboardd|searchd|sharingd|suggestd|symptomsd|timed|thermalmonitord|useractivityd|vmd|wifid|wirelessproxd";
 
 enum idevice_options lookup_opts = IDEVICE_LOOKUP_USBMUX | IDEVICE_LOOKUP_NETWORK;
 
 static char *line = NULL;
 static int line_buffer_size = 0;
 static int lp = 0;
+
+#ifdef WIN32
+static WORD COLOR_RESET = 0;
+static HANDLE h_stdout = INVALID_HANDLE_VALUE;
+
+#define COLOR_NORMAL        COLOR_RESET
+#define COLOR_DARK          FOREGROUND_INTENSITY
+#define COLOR_RED           FOREGROUND_RED |FOREGROUND_INTENSITY
+#define COLOR_DARK_RED      FOREGROUND_RED
+#define COLOR_GREEN         FOREGROUND_GREEN | FOREGROUND_INTENSITY
+#define COLOR_DARK_GREEN    FOREGROUND_GREEN
+#define COLOR_YELLOW        FOREGROUND_GREEN | FOREGROUND_RED | FOREGROUND_INTENSITY
+#define COLOR_DARK_YELLOW   FOREGROUND_GREEN | FOREGROUND_RED
+#define COLOR_BLUE          FOREGROUND_BLUE | FOREGROUND_INTENSITY
+#define COLOR_DARK_BLUE     FOREGROUND_BLUE
+#define COLOR_MAGENTA       FOREGROUND_BLUE | FOREGROUND_RED | FOREGROUND_INTENSITY
+#define COLOR_DARK_MAGENTA  FOREGROUND_BLUE | FOREGROUND_RED
+#define COLOR_CYAN          FOREGROUND_BLUE | FOREGROUND_GREEN
+#define COLOR_BRIGHT_CYAN   FOREGROUND_BLUE | FOREGROUND_GREEN | FOREGROUND_INTENSITY
+#define COLOR_DARK_CYAN     FOREGROUND_BLUE | FOREGROUND_GREEN
+#define COLOR_WHITE         FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE | FOREGROUND_INTENSITY
+#define COLOR_DARK_WHITE    FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE
+
+static void TEXT_COLOR(WORD attr)
+{
+	if (use_colors) {
+		SetConsoleTextAttribute(h_stdout, attr);
+	}
+}
+#else
 
 #define COLOR_RESET         "\e[m"
 #define COLOR_NORMAL        "\e[0m"
@@ -93,6 +123,7 @@ static int lp = 0;
 #define COLOR_DARK_WHITE    "\e[0;37m"
 
 #define TEXT_COLOR(x) if (use_colors) { fwrite(x, 1, sizeof(x)-1, stdout); }
+#endif
 
 static void add_filter(const char* filterstr)
 {
@@ -298,7 +329,11 @@ static void syslog_callback(char c, void *user_data)
 				/* log level */
 				char* level_start = p;
 				char* level_end = p;
+#ifdef WIN32
+				WORD level_color = COLOR_NORMAL;
+#else
 				const char* level_color = NULL;
+#endif
 				if (!strncmp(p, "<Notice>:", 9)) {
 					level_end += 9;
 					level_color = COLOR_GREEN;
@@ -491,6 +526,7 @@ static void print_usage(int argc, char **argv, int is_error)
 	  "  -x, --exit       exit when device disconnects\n" \
 	  "  -h, --help       prints usage information\n" \
 	  "  -d, --debug      enable communication debugging\n" \
+	  " --no-colors       disable colored output\n" \
 	  "\n" \
 	  "FILTER OPTIONS:\n" \
 	  "  -m, --match STRING     only print messages that contain STRING\n" \
@@ -511,6 +547,14 @@ static void print_usage(int argc, char **argv, int is_error)
 
 int main(int argc, char *argv[])
 {
+#ifdef WIN32
+	CONSOLE_SCREEN_BUFFER_INFO csbi;
+	h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+	if (GetConsoleScreenBufferInfo(h_stdout, &csbi)) {
+		COLOR_RESET = csbi.wAttributes;
+	}
+#endif
+	int no_colors = 0;
 	int include_filter = 0;
 	int exclude_filter = 0;
 	int include_kernel = 0;
@@ -531,6 +575,7 @@ int main(int argc, char *argv[])
 		{ "kernel", no_argument, NULL, 'k' },
 		{ "no-kernel", no_argument, NULL, 'K' },
 		{ "quiet-list", no_argument, NULL, 1 },
+		{ "no-colors", no_argument, NULL, 2 },
 		{ NULL, 0, NULL, 0}
 	};
 
@@ -640,6 +685,9 @@ int main(int argc, char *argv[])
 			printf("%s\n", QUIET_FILTER);
 			return 0;
 		}
+		case 2:
+			no_colors = 1;
+			break;
 		default:
 			print_usage(argc, argv, 1);
 			return 2;
@@ -691,7 +739,7 @@ int main(int argc, char *argv[])
 	argc -= optind;
 	argv += optind;
 
-	if (isatty(1)) {
+	if (!no_colors && isatty(1)) {
 		use_colors = 1;
 	}
 
