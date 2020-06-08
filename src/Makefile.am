@@ -23,6 +23,7 @@ libimobiledevice_la_SOURCES = idevice.c idevice.h \
 		       house_arrest.c house_arrest.h\
 		       mobilebackup2.c mobilebackup2.h\
 		       misagent.c misagent.h\
+		       mobileconfig.c mobileconfig.h\
 		       restore.c restore.h\
 		       diagnostics_relay.c diagnostics_relay.h\
 		       heartbeat.c heartbeat.h\

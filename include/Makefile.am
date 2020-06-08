@@ -14,6 +14,7 @@ nobase_include_HEADERS = libimobiledevice/libimobiledevice.h \
 			 libimobiledevice/house_arrest.h \
 			 libimobiledevice/mobilebackup2.h \
 			 libimobiledevice/misagent.h \
+			 libimobiledevice/mobileconfig.h \
 			 libimobiledevice/restore.h\
 			 libimobiledevice/webinspector.h\
 			 libimobiledevice/heartbeat.h\
