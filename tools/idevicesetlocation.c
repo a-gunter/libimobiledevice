@@ -21,6 +21,9 @@
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
+
+#define TOOL_NAME "idevicesetlocation"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -49,31 +52,34 @@ static void print_usage(int argc, char **argv, int is_error)
 	fprintf(is_error ? stderr : stdout, "Usage: %s [OPTIONS] -- <LAT> <LONG>\n", bname);
 	fprintf(is_error ? stderr : stdout, "       %s [OPTIONS] reset\n", bname);
 	fprintf(is_error ? stderr : stdout, "\n" \
-	  "OPTIONS:\n" \
-	  "  -u, --udid UDID    target specific device by UDID\n" \
-	  "  -n, --network      connect to network device even if available via USB\n" \
-	  "  -h, --help         prints usage information\n" \
-	  "  -d, --debug        enable communication debugging\n" \
-	  "\n"
-	  "Homepage: <" PACKAGE_URL ">\n"
+		"OPTIONS:\n" \
+		"  -u, --udid UDID    target specific device by UDID\n" \
+		"  -n, --network      connect to network device\n" \
+		"  -d, --debug        enable communication debugging\n" \
+		"  -h, --help         prints usage information\n" \
+		"  -v, --version      prints version information\n" \
+		"\n" \
+		"Homepage:    <" PACKAGE_URL ">\n" \
+		"Bug Reports: <" PACKAGE_BUGREPORT ">\n"
 	);
 }
 
 int main(int argc, char **argv)
 {
+	int c = 0;
 	const struct option longopts[] = {
-		{ "help", no_argument, NULL, 'h' },
-		{ "udid", required_argument, NULL, 'u' },
-		{ "debug", no_argument, NULL, 'd' },
-		{ "network", no_argument, NULL, 'n' },
+		{ "help",    no_argument,       NULL, 'h' },
+		{ "udid",    required_argument, NULL, 'u' },
+		{ "debug",   no_argument,       NULL, 'd' },
+		{ "network", no_argument,       NULL, 'n' },
+		{ "version", no_argument,       NULL, 'v' },
 		{ NULL, 0, NULL, 0}
 	};
 	uint32_t mode = 0;
-	char *udid = NULL;
-	enum idevice_options lookup_opts = IDEVICE_LOOKUP_USBMUX | IDEVICE_LOOKUP_NETWORK;
+	const char *udid = NULL;
+	int use_network = 0;
 
-	int c = 0;
-	while ((c = getopt_long(argc, argv, "dhu:n", longopts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "dhu:nv", longopts, NULL)) != -1) {
 		switch (c) {
 		case 'd':
 			idevice_set_debug_level(1);
@@ -84,14 +90,16 @@ int main(int argc, char **argv)
 				print_usage(argc, argv, 1);
 				return 2;
 			}
-			free(udid);
-			udid = strdup(optarg);
+			udid = optarg;
 			break;
 		case 'n':
-			lookup_opts |= IDEVICE_LOOKUP_PREFER_NETWORK;
+			use_network = 1;
 			break;
 		case 'h':
 			print_usage(argc, argv, 0);
+			return 0;
+		case 'v':
+			printf("%s %s\n", TOOL_NAME, PACKAGE_VERSION);
 			return 0;
 		default:
 			print_usage(argc, argv, 1);
@@ -120,7 +128,7 @@ int main(int argc, char **argv)
 
 	idevice_t device = NULL;
 
-	if (idevice_new_with_options(&device, udid, lookup_opts) != IDEVICE_E_SUCCESS) {
+	if (idevice_new_with_options(&device, udid, (use_network) ? IDEVICE_LOOKUP_NETWORK : IDEVICE_LOOKUP_USBMUX) != IDEVICE_E_SUCCESS) {
 		if (udid) {
 			printf("ERROR: Device %s not found!\n", udid);
 		} else {
@@ -130,7 +138,7 @@ int main(int argc, char **argv)
 	}
 
 	lockdownd_client_t lockdown;
-	lockdownd_client_new_with_handshake(device, &lockdown, NULL);
+	lockdownd_client_new_with_handshake(device, &lockdown, TOOL_NAME);
 
 	lockdownd_service_descriptor_t svc = NULL;
 	if (lockdownd_start_service(lockdown, DT_SIMULATELOCATION_SERVICE, &svc) != LOCKDOWN_E_SUCCESS) {
@@ -175,7 +183,7 @@ int main(int argc, char **argv)
 		s = 0;
 		service_send(service, buf, len, &s);
 	}
-	
+
 	idevice_free(device);
 
 	return 0;

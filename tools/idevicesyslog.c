@@ -24,6 +24,8 @@
 #include "config.h"
 #endif
 
+#define TOOL_NAME "idevicesyslog"
+
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
@@ -67,7 +69,7 @@ static syslog_relay_client_t syslog = NULL;
 
 static const char QUIET_FILTER[] = "CircleJoinRequested|CommCenter|HeuristicInterpreter|MobileMail|PowerUIAgent|ProtectedCloudKeySyncing|SpringBoard|UserEventAgent|WirelessRadioManagerd|accessoryd|accountsd|aggregated|analyticsd|appstored|apsd|assetsd|assistant_service|backboardd|biometrickitd|bluetoothd|calaccessd|callservicesd|cloudd|com.apple.Safari.SafeBrowsing.Service|contextstored|corecaptured|coreduetd|corespeechd|cdpd|dasd|dataaccessd|distnoted|dprivacyd|duetexpertd|findmydeviced|fmfd|fmflocatord|gpsd|healthd|homed|identityservicesd|imagent|itunescloudd|itunesstored|kernel|locationd|maild|mDNSResponder|mediaremoted|mediaserverd|mobileassetd|nanoregistryd|nanotimekitcompaniond|navd|nsurlsessiond|passd|pasted|photoanalysisd|powerd|powerlogHelperd|ptpd|rapportd|remindd|routined|runningboardd|searchd|sharingd|suggestd|symptomsd|timed|thermalmonitord|useractivityd|vmd|wifid|wirelessproxd";
 
-enum idevice_options lookup_opts = IDEVICE_LOOKUP_USBMUX | IDEVICE_LOOKUP_NETWORK;
+static int use_network = 0;
 
 static char *line = NULL;
 static int line_buffer_size = 0;
@@ -401,14 +403,14 @@ static void syslog_callback(char c, void *user_data)
 
 static int start_logging(void)
 {
-	idevice_error_t ret = idevice_new_with_options(&device, udid, lookup_opts);
+	idevice_error_t ret = idevice_new_with_options(&device, udid, (use_network) ? IDEVICE_LOOKUP_NETWORK : IDEVICE_LOOKUP_USBMUX);
 	if (ret != IDEVICE_E_SUCCESS) {
 		fprintf(stderr, "Device with udid %s not found!?\n", udid);
 		return -1;
 	}
 
 	lockdownd_client_t lockdown = NULL;
-	lockdownd_error_t lerr = lockdownd_client_new_with_handshake(device, &lockdown, "idevicesyslog");
+	lockdownd_error_t lerr = lockdownd_client_new_with_handshake(device, &lockdown, TOOL_NAME);
 	if (lerr != LOCKDOWN_E_SUCCESS) {
 		fprintf(stderr, "ERROR: Could not connect to lockdownd: %d\n", lerr);
 		idevice_free(device);
@@ -519,29 +521,35 @@ static void print_usage(int argc, char **argv, int is_error)
 	name = strrchr(argv[0], '/');
 	fprintf(is_error ? stderr : stdout, "Usage: %s [OPTIONS]\n", (name ? name + 1: argv[0]));
 	fprintf(is_error ? stderr : stdout,
-	  "Relay syslog of a connected device.\n\n" \
-	  "OPTIONS:\n" \
-	  "  -u, --udid UDID  target specific device by UDID\n" \
-	  "  -n, --network    connect to network device even if available via USB\n" \
-	  "  -x, --exit       exit when device disconnects\n" \
-	  "  -h, --help       prints usage information\n" \
-	  "  -d, --debug      enable communication debugging\n" \
-	  " --no-colors       disable colored output\n" \
-	  "\n" \
-	  "FILTER OPTIONS:\n" \
-	  "  -m, --match STRING     only print messages that contain STRING\n" \
-	  "  -t, --trigger STRING   start logging when matching STRING\n" \
-	  "  -T, --untrigger STRING  stop logging when matching STRING\n" \
-	  "  -p, --process PROCESS  only print messages from matching process(es)\n" \
-	  "  -e, --exclude PROCESS  print all messages except matching process(es)\n" \
-	  "        PROCESS is a process name or multiple process names separated by \"|\".\n" \
-	  "  -q, --quiet      set a filter to exclude common noisy processes\n" \
-	  "  --quiet-list     prints the list of processes for --quiet and exits\n" \
-	  "  -k, --kernel     only print kernel messages\n" \
-	  "  -K, --no-kernel  suppress kernel messages\n" \
-	  "For filter example usage consult idevicesyslog(1) man page.\n" \
-	  "\n" \
-	  "Homepage: <" PACKAGE_URL ">\n"
+		"\n" \
+		"Relay syslog of a connected device.\n" \
+		"\n" \
+		"OPTIONS:\n" \
+		"  -u, --udid UDID  target specific device by UDID\n" \
+		"  -n, --network    connect to network device\n" \
+		"  -x, --exit       exit when device disconnects\n" \
+		"  -h, --help       prints usage information\n" \
+		"  -d, --debug      enable communication debugging\n" \
+		"  -v, --version    prints version information\n" \
+		" --no-colors       disable colored output\n" \
+		"\n" \
+		"FILTER OPTIONS:\n" \
+		"  -m, --match STRING      only print messages that contain STRING\n" \
+		"  -t, --trigger STRING    start logging when matching STRING\n" \
+		"  -T, --untrigger STRING  stop logging when matching STRING\n" \
+		"  -p, --process PROCESS   only print messages from matching process(es)\n" \
+		"  -e, --exclude PROCESS   print all messages except matching process(es)\n" \
+		"                          PROCESS is a process name or multiple process names\n" \
+		"                          separated by \"|\".\n" \
+		"  -q, --quiet             set a filter to exclude common noisy processes\n" \
+		"  --quiet-list            prints the list of processes for --quiet and exits\n" \
+		"  -k, --kernel            only print kernel messages\n" \
+		"  -K, --no-kernel         suppress kernel messages\n" \
+		"\n" \
+		"For filter examples consult idevicesyslog(1) man page.\n" \
+		"\n" \
+		"Homepage:    <" PACKAGE_URL ">\n"
+		"Bug Reports: <" PACKAGE_BUGREPORT ">\n"
 	);
 }
 
@@ -576,6 +584,7 @@ int main(int argc, char *argv[])
 		{ "no-kernel", no_argument, NULL, 'K' },
 		{ "quiet-list", no_argument, NULL, 1 },
 		{ "no-colors", no_argument, NULL, 2 },
+		{ "version", no_argument, NULL, 'v' },
 		{ NULL, 0, NULL, 0}
 	};
 
@@ -586,7 +595,7 @@ int main(int argc, char *argv[])
 	signal(SIGPIPE, SIG_IGN);
 #endif
 
-	while ((c = getopt_long(argc, argv, "dhu:nxt:T:m:e:p:qkK", longopts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "dhu:nxt:T:m:e:p:qkKv", longopts, NULL)) != -1) {
 		switch (c) {
 		case 'd':
 			idevice_set_debug_level(1);
@@ -601,7 +610,7 @@ int main(int argc, char *argv[])
 			udid = strdup(optarg);
 			break;
 		case 'n':
-			lookup_opts |= IDEVICE_LOOKUP_PREFER_NETWORK;
+			use_network = 1;
 			break;
 		case 'q':
 			exclude_filter++;
@@ -688,6 +697,9 @@ int main(int argc, char *argv[])
 		case 2:
 			no_colors = 1;
 			break;
+		case 'v':
+			printf("%s %s\n", TOOL_NAME, PACKAGE_VERSION);
+			return 0;
 		default:
 			print_usage(argc, argv, 1);
 			return 2;

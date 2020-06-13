@@ -435,17 +435,19 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 		*connection = new_connection;
 		return IDEVICE_E_SUCCESS;
 	} else if (device->conn_type == CONNECTION_NETWORK) {
-		unsigned char saddr_[32];
-		memset(saddr_, '\0', sizeof(saddr_));
-		struct sockaddr* saddr = (struct sockaddr*)&saddr_[0];
+		struct sockaddr_storage saddr_storage;
+		struct sockaddr* saddr = (struct sockaddr*)&saddr_storage;
+
+		/* FIXME: Improve handling of this platform/host dependent connection data */
 		if (((char*)device->conn_data)[1] == 0x02) { // AF_INET
 			saddr->sa_family = AF_INET;
-			memcpy(&saddr->sa_data[0], (char*)device->conn_data+2, 14);
+			memcpy(&saddr->sa_data[0], (char*)device->conn_data + 2, 14);
 		}
-		else if (((char*)device->conn_data)[1] == 0x1E) { //AF_INET6 (bsd)
+		else if (((char*)device->conn_data)[1] == 0x1E) { // AF_INET6 (bsd)
 #ifdef AF_INET6
 			saddr->sa_family = AF_INET6;
-			memcpy(&saddr->sa_data[0], (char*)device->conn_data+2, 26);
+			/* copy the address and the host dependent scope id */
+			memcpy(&saddr->sa_data[0], (char*)device->conn_data + 2, 26);
 #else
 			debug_info("ERROR: Got an IPv6 address but this system doesn't support IPv6");
 			return IDEVICE_E_UNKNOWN_ERROR;
@@ -455,23 +457,30 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connect(idevice_t device, uint16_t 
 			debug_info("Unsupported address family 0x%02x", ((char*)device->conn_data)[1]);
 			return IDEVICE_E_UNKNOWN_ERROR;
 		}
+
 		char addrtxt[48];
 		addrtxt[0] = '\0';
+
 		if (!socket_addr_to_string(saddr, addrtxt, sizeof(addrtxt))) {
 			debug_info("Failed to convert network address: %d (%s)", errno, strerror(errno));
 		}
+
 		debug_info("Connecting to %s port %d...", addrtxt, port);
+
 		int sfd = socket_connect_addr(saddr, port);
 		if (sfd < 0) {
 			debug_info("ERROR: Connecting to network device failed: %d (%s)", errno, strerror(errno));
 			return IDEVICE_E_NO_DEVICE;
 		}
+
 		idevice_connection_t new_connection = (idevice_connection_t)malloc(sizeof(struct idevice_connection_private));
 		new_connection->type = CONNECTION_NETWORK;
 		new_connection->data = (void*)(long)sfd;
 		new_connection->ssl_data = NULL;
 		new_connection->device = device;
+
 		*connection = new_connection;
+
 		return IDEVICE_E_SUCCESS;
 	} else {
 		debug_info("Unknown connection type %d", device->conn_type);
@@ -550,10 +559,10 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_send(idevice_connection_
 		while (sent < len) {
 #ifdef HAVE_OPENSSL
 			int c = socket_check_fd((int)(long)connection->data, FDM_WRITE, 100);
-			if (c < 0) {
-				break;
-			} else if (c == 0) {
+			if (c == 0 || c == -ETIMEDOUT || c == -EAGAIN) {
 				continue;
+			} else if (c < 0) {
+				break;
 			}
 			int s = SSL_write(connection->ssl_data->session, (const void*)(data+sent), (int)(len-sent));
 			if (s <= 0) {
@@ -670,8 +679,8 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_receive_timeout(idevice_
 					case IDEVICE_E_SUCCESS:
 						break;
 					case IDEVICE_E_UNKNOWN_ERROR:
-						debug_info("ERROR: socket_check_fd returned %d (%s)", conn_error, strerror(-conn_error));
 					default:
+						debug_info("ERROR: socket_check_fd returned %d (%s)", conn_error, strerror(-conn_error));
 						return error;
 				}
 			}
@@ -702,7 +711,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_receive_timeout(idevice_
 			*recv_bytes = 0;
 			return IDEVICE_E_SSL_ERROR;
 		}
-		
+
 		*recv_bytes = received;
 		return IDEVICE_E_SUCCESS;
 	}
@@ -913,7 +922,7 @@ static const char *ssl_error_to_string(int e)
 		case SSL_ERROR_NONE:
 			return "SSL_ERROR_NONE";
 		case SSL_ERROR_SSL:
-			return "SSL_ERROR_SSL";
+			return ERR_error_string(ERR_get_error(), NULL);
 		case SSL_ERROR_WANT_READ:
 			return "SSL_ERROR_WANT_READ";
 		case SSL_ERROR_WANT_WRITE:
@@ -1005,6 +1014,10 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_connection_enable_ssl(idevice_conne
 		BIO_free(ssl_bio);
 		return ret;
 	}
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+	SSL_CTX_set_security_level(ssl_ctx, 0);
+#endif
 
 #if OPENSSL_VERSION_NUMBER < 0x10100002L || \
 	(defined(LIBRESSL_VERSION_NUMBER) && (LIBRESSL_VERSION_NUMBER < 0x2060000fL))
