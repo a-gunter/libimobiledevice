@@ -95,7 +95,7 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	if (LOCKDOWN_E_SUCCESS != (ldret = lockdownd_client_new(device, &client, TOOL_NAME))) {
+	if (LOCKDOWN_E_SUCCESS != (ldret = lockdownd_client_new_with_handshake(device, &client, TOOL_NAME))) {
 		printf("ERROR: Could not connect to lockdownd, error code %d\n", ldret);
 		idevice_free(device);
 		return -1;
@@ -106,9 +106,10 @@ int main(int argc, char *argv[])
 	if(lockdownd_enter_recovery(client) != LOCKDOWN_E_SUCCESS)
 	{
 		printf("Failed to enter recovery mode.\n");
-	}
-	printf("Device is successfully switching to recovery mode.\n");
-
+    } else {
+        printf("Device is successfully switching to recovery mode.\n");
+    }
+       
 	lockdownd_client_free(client);
 	idevice_free(device);
 
