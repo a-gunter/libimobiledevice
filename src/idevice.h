@@ -76,6 +76,7 @@ struct idevice_private {
 	enum idevice_connection_type conn_type;
 	void *conn_data;
 	int version;
+	char *device_class;
 };
 
 #endif

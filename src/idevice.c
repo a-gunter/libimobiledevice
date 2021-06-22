@@ -350,6 +350,7 @@ static idevice_t idevice_from_mux_device(usbmuxd_device_info_t *muxdev)
 	device->udid = strdup(muxdev->udid);
 	device->mux_id = muxdev->handle;
 	device->version = 0;
+	device->device_class = NULL;
 	switch (muxdev->conn_type) {
 	case CONNECTION_TYPE_USB:
 		device->conn_type = CONNECTION_USBMUXD;
@@ -407,6 +408,7 @@ LIBIMOBILEDEVICE_API idevice_error_t idevice_free(idevice_t device)
 	ret = IDEVICE_E_SUCCESS;
 
 	free(device->udid);
+	free(device->device_class);
 
 	if (device->conn_data) {
 		free(device->conn_data);

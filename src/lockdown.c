@@ -696,6 +696,19 @@ LIBIMOBILEDEVICE_API lockdownd_error_t lockdownd_client_new_with_handshake(idevi
 		}
 		plist_free(p_version);
 	}
+	
+	if (device->device_class == NULL) {
+		plist_t p_dev_class = NULL;
+		if (lockdownd_get_value(client_loc, NULL, "DeviceClass", &p_dev_class) == LOCKDOWN_E_SUCCESS) {
+			int vers[3] = {0, 0, 0};
+			char *s_dev_class = NULL;
+			plist_get_string_val(p_dev_class, &s_dev_class);
+			if (s_dev_class != NULL) {
+				device->device_class = s_dev_class;
+			}
+		}
+		plist_free(p_dev_class);
+	}
 
 	userpref_read_pair_record(client_loc->udid, &pair_record);
 	if (pair_record) {
@@ -713,7 +726,7 @@ LIBIMOBILEDEVICE_API lockdownd_error_t lockdownd_client_new_with_handshake(idevi
 	plist_free(pair_record);
 	pair_record = NULL;
 
-	if (device->version < DEVICE_VERSION(7,0,0)) {
+	if (device->version < DEVICE_VERSION(7,0,0) && (device->device_class == NULL || strcmp(device->device_class, "Watch"))) {
 		/* for older devices, we need to validate pairing to receive trusted host status */
 		ret = lockdownd_validate_pair(client_loc, NULL);
 
